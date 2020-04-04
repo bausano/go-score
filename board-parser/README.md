@@ -48,6 +48,29 @@ the board would be viewed from angle 90deg.
 
 ![Board from low angle](assets/board_from_low_angle.jpeg)
 
+## Testing
+During development we use pictures we took of the go board and evaluate the
+algorithm against them. To bench mark an algorithm, we can take a picture of an
+empty board from several angles and generate many different board
+constellations. We can then use this data set to validate that the algorithm
+yields satisfying results.
+
 ## Approaches
-### Contrast between stones
-We focus on the fact that the stones are going to be black and white. TODO
+### Contrast highlighting and finding elliptical objects
+We focus on the fact that the stones are going to be black and white. Therefore
+we can rule out pixels which are coloured. We now have a picture which contains
+black stones, white stones, board lines and noise. To rule out noise, we can
+leverage the shape of the stones. Depending on the point of view, they're going
+to be either elliptical or circular. We attempt to find objects which are
+approximated by the equation of ellipsis.
+
+```
+(x^2)   (y^2)
+----- + ----- = 1
+  a       b
+```
+
+Once we have found some objects which are identified by this equation and their
+`a`, `b` and size match, we can calculate the distances between them to identify
+more stones. Eventually, we will have identified enough stones to be able to say
+what's the spacing between the intersections.
