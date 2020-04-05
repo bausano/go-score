@@ -14,3 +14,4 @@ where
 }
 
 impl NumExt for u8 {}
+impl NumExt for u32 {}

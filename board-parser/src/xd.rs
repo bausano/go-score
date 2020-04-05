@@ -4,7 +4,7 @@ const BLACK_THRESHOLD: u8 = 30;
 const GRAYNESS_LIMIT: u8 = 8;
 const MIN_STONE_SIZE: u32 = 5;
 
-pub(crate) type BlackPixels = Vec<Vec<bool>>;
+type BlackPixels = Vec<Vec<bool>>;
 
 #[derive(Debug)]
 pub struct BlackStone {
@@ -93,9 +93,62 @@ impl BlackStone {
     fn height(&self) -> u32 {
         self.bottom_right.y - self.top_left.y
     }
+
+    fn center(&self) -> Point {
+        let x =
+            self.bottom_right.x - (self.bottom_right.x - self.top_left.x) / 2;
+        let y =
+            self.bottom_right.y - (self.bottom_right.y - self.top_left.y) / 2;
+        Point::new(x, y)
+    }
 }
 
-pub fn find_black_stones(image: &image::RgbImage) -> Vec<BlackStone> {
+pub fn xd(image: &image::RgbImage) -> Option<()> {
+    let (mut neighbor_stone_distance, stones) = find_black_stones(image)?;
+    let stones: Vec<_> =
+        stones.into_iter().map(|stone| stone.center()).collect();
+    let mut center_distances =
+        Vec::with_capacity((stones.len() - 1) * 2 + stones.len());
+
+    for (i, stone) in stones[0..stones.len() - 2].iter().enumerate() {
+        let next_stone = stones[i + 1];
+        center_distances.push(stone.x.diff(next_stone.x) as f32);
+        center_distances.push(stone.y.diff(next_stone.y) as f32);
+    }
+
+    println!("ok? {}", neighbor_stone_distance);
+    loop {
+        let mut total_change = 0.0;
+        for d in &center_distances {
+            let div = d / neighbor_stone_distance;
+            let closest_int = div.round().max(1.0);
+            total_change += d / closest_int - neighbor_stone_distance;
+            println!(
+                "d / closest_int - dist = {} / {} - {}",
+                d, closest_int, neighbor_stone_distance
+            );
+        }
+        let average_change = total_change / center_distances.len() as f32;
+        neighbor_stone_distance += average_change;
+        println!("Hello {}", average_change);
+        if average_change.abs() < 1.0 {
+            break;
+        }
+    }
+
+    println!(
+        "Two stones are neighbors approx by {} pixels.",
+        neighbor_stone_distance
+    );
+
+    // TODO
+
+    Some(())
+}
+
+fn find_black_stones(
+    image: &image::RgbImage,
+) -> Option<(f32, Vec<BlackStone>)> {
     let (width, height) = image.dimensions();
     let width_usize = width as usize;
     let mut black_pixels: BlackPixels = (0..height)
@@ -123,7 +176,7 @@ pub fn find_black_stones(image: &image::RgbImage) -> Vec<BlackStone> {
 
     let black_objects = find_black_objects(black_pixels);
     if black_objects.is_empty() {
-        return black_objects;
+        return None;
     }
 
     // We collect widths and heights of all objects. Majority of the objects are
@@ -162,10 +215,10 @@ pub fn find_black_stones(image: &image::RgbImage) -> Vec<BlackStone> {
         })
         .collect();
 
-    // #[cfg(test)]
-    // debug_stones(width, height, &stones);
+    #[cfg(test)]
+    debug_stones(width, height, &stones);
 
-    stones
+    Some(((mean_height + mean_width), stones))
 }
 
 /// Finds objects within given 2D array which has black pixels only. Uses flood
@@ -272,7 +325,8 @@ mod tests {
         for (test, count) in TEST_BLACK_STONE_COUNTS {
             let image = image::open(format!("{}/{}.jpeg", ASSETS_DIR, test))
                 .expect("Cannot open image");
-            let stones = find_black_stones(&image.to_rgb());
+            let (_, stones) = find_black_stones(&image.to_rgb())
+                .expect("The test was expected to find some stones");
             assert_eq!(
                 stones.len(),
                 *count,
