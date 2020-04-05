@@ -1,23 +1,26 @@
 use crate::num_ext::*;
+use std::collections::HashMap;
 
 const BLACK_THRESHOLD: u8 = 30;
 const GRAYNESS_LIMIT: u8 = 8;
 const MIN_STONE_SIZE: u32 = 5;
+const MIN_BLACK_STONES_ON_BOARD: usize = 6;
 
+pub type BoardMap = HashMap<(i8, i8), Point>;
 type BlackPixels = Vec<Vec<bool>>;
 
 #[derive(Debug)]
-pub struct BlackStone {
+struct BlackStone {
     /// The left most point with the lowest y and x value.
-    pub top_left: Point,
+    top_left: Point,
     /// The right most point with the highest y and x value.
-    pub bottom_right: Point,
+    bottom_right: Point,
 }
 
 #[derive(Copy, Clone, Debug)]
 pub struct Point {
-    pub x: u32,
-    pub y: u32,
+    x: u32,
+    y: u32,
 }
 
 impl Point {
@@ -103,10 +106,16 @@ impl BlackStone {
     }
 }
 
-pub fn xd(image: &image::RgbImage) -> Option<()> {
+pub fn board_map(image: &image::RgbImage) -> Option<BoardMap> {
     let (stone_size, stones) = find_black_stones(image)?;
+    // From now on we're only concerned about the center points.
     let stones: Vec<_> =
         stones.into_iter().map(|stone| stone.center()).collect();
+
+    // There must be at least a few black stones on the board.
+    if stones.len() < MIN_BLACK_STONES_ON_BOARD {
+        return None;
+    }
 
     // We will sample distances between stones.
     // We cannot really estimate exactly how many distances are there going to
@@ -114,7 +123,9 @@ pub fn xd(image: &image::RgbImage) -> Option<()> {
     // distances which are lower than stone size. However since we add 2
     // distances for each stone and then another 2 distances for each stone in
     // the first half of the array, we can try to approximate the capacity.
-    let mut center_distances = Vec::with_capacity(2 * stones.len());
+    // Then we also put distances between the first and last, second and second
+    // to last, etc.
+    let mut sampled_distances = Vec::with_capacity(6 * stones.len());
 
     // Adds distances between 2 stones into the array.
     let mut add_distances = |stone_a: Point, stone_b: Point| {
@@ -124,57 +135,163 @@ pub fn xd(image: &image::RgbImage) -> Option<()> {
         // We don't want distances between stones if they are on the same row,
         // as then x would be around 0.
         if x_diff > stone_size {
-            center_distances.push(x_diff);
+            sampled_distances.push(x_diff);
         }
 
         // We don't want distances between stones if they are on the same column
         // as then y would be around 0.
         if y_diff > stone_size {
-            center_distances.push(y_diff);
+            sampled_distances.push(y_diff);
         }
     };
 
     let stones_half_count = stones.len() / 2;
     for (i, stone) in stones[0..stones.len() - 2].iter().enumerate() {
+        let stone = *stone;
+
+        // These are going to be most likely stones which are adjacent on rows.
         let next_stone = stones[i + 1];
-        add_distances(*stone, next_stone);
+        add_distances(stone, next_stone);
+
+        // These stones are going to have the greatest distances. This is going
+        // to be important as a heuristics later on. If there are enough
+        // distances which are larger than 13 intersections apart, we say that
+        // the board is 19x19.
+        let far_away_stone = stones[stones.len() - i - 1];
+        add_distances(stone, far_away_stone);
 
         // The first stone gets pair with a stone in the middle of the array,
         // second stone with the stone in the middle of the array + 1, and so on
         // until we reach the middle.
         if i < stones_half_count {
             let stone_in_other_half = stones[i + stones_half_count];
-            add_distances(*stone, stone_in_other_half);
+            add_distances(stone, stone_in_other_half);
         }
     }
 
-    // We're going to try to find a number which divide distances into units.
-    // TODO: Add a cap on how far away stones can be, which is by 19 *
-    // `neighbor_stone_distance`.
-    // TODO: Make sure that the `neighbor_stone_distance` never goes below
-    // `stone_size`.
-    // TODO: Have a hard limit on number of iterations.
-    let mut neighbor_stone_distance = stone_size;
+    // How far away are two stones which are places next to each other.
+    // Starts as a stone size and finds a more appropriate value.
+    let adjacent_intersection_distance =
+        average_distance_between_adjacent_intersections(
+            &sampled_distances,
+            stone_size,
+        );
+
+    println!(
+        "Two stones are neighbors approx by {} pixels.",
+        adjacent_intersection_distance
+    );
+
+    let mut total_x = 0;
+    let mut total_y = 0;
+    for stone in &stones {
+        total_x += stone.x;
+        total_y += stone.y;
+    }
+    let board_center_point = Point::new(
+        total_x / stones.len() as u32,
+        total_y / stones.len() as u32,
+    );
+
+    let mut stones_with_distance_to_center: Vec<_> = stones
+        .iter()
+        .map(|stone| {
+            let diff_x = stone.x.diff(board_center_point.x);
+            let diff_y = stone.y.diff(board_center_point.y);
+            (diff_x * diff_x + diff_y * diff_y, stone)
+        })
+        .collect();
+    stones_with_distance_to_center.sort_by(|(a, _), (b, _)| a.cmp(b));
+    let (_, board_center_point) = stones_with_distance_to_center[0];
+    let board_center_point = *board_center_point;
+    let mut board: HashMap<(i8, i8), Point> = HashMap::with_capacity(19);
+    board.insert((0, 0), board_center_point);
+    for (_, stone) in stones_with_distance_to_center {
+        let stone = *stone;
+        let diff_x = stone.x.diff(board_center_point.x) as f32;
+        let diff_y = stone.y.diff(board_center_point.y) as f32;
+        let div_x = diff_x / adjacent_intersection_distance;
+        let div_y = diff_y / adjacent_intersection_distance;
+
+        // If the distance between the center point is more than the possible
+        // board size, we can rule it out immediately.
+        if div_x > 20.0 || div_y > 20.0 {
+            continue;
+        }
+
+        // For example an error for numbers 7.6 and 5.2 is .4 + .2 = 0.6
+        // We get abs value after sub from .5. The lower the error the higher
+        // this value.
+        // |.5 - .6| = .1
+        // |.5 - .2| = .3
+        // 1 - .1 - .3 = .6
+        let e = 1.0 - (0.5 - div_y.fract()).abs() - (0.5 - div_x.fract()).abs();
+        if e > 0.5 {
+            // This stone is positioned weirdly. Needs more heuristics based on
+            // other points in the hash map. Easier is to skip it and rely on
+            // sieves later on which are aware of the fact that some black
+            // stones were not found during this phase.
+            continue;
+        }
+
+        // If the stone is higher than center point, the row is negative.
+        let row = if div_y == 0.0 {
+            0
+        } else if stone.y > board_center_point.y {
+            div_y.round() as i8
+        } else {
+            -div_y.round() as i8
+        };
+
+        // If the stone is more to left than center point, the col is negative.
+        let column = if div_x == 0.0 {
+            0
+        } else if stone.x > board_center_point.x {
+            div_x.round() as i8
+        } else {
+            -div_x.round() as i8
+        };
+
+        board.insert((column, row), stone);
+    }
+
+    #[cfg(test)]
+    debug_board(
+        image.width(),
+        image.height(),
+        adjacent_intersection_distance,
+        board_center_point,
+        &board,
+    );
+
+    Some(board)
+}
+
+// We're going to try to find a number which divide distances into units.
+// TODO: Add a cap on how far away stones can be, which is by 19 *
+// `neighbor_stone_distance`.
+// TODO: Make sure that the `neighbor_stone_distance` never goes below
+// `stone_size`.
+// TODO: Have a hard limit on number of iterations.
+fn average_distance_between_adjacent_intersections(
+    sampled_distances: &[f32],
+    mut neighbor_stone_distance: f32,
+) -> f32 {
     loop {
         let mut total_change = 0.0;
-        for d in &center_distances {
+        for d in sampled_distances {
             let div = d / neighbor_stone_distance;
             let closest_int = div.round().max(1.0);
             total_change += d / closest_int - neighbor_stone_distance;
         }
-        let average_change = total_change / center_distances.len() as f32;
+        let average_change = total_change / sampled_distances.len() as f32;
         neighbor_stone_distance += average_change;
         if average_change.abs() < 1.0 {
             break;
         }
     }
 
-    println!(
-        "Two stones are neighbors approx by {} pixels.",
-        neighbor_stone_distance
-    );
-
-    Some(())
+    neighbor_stone_distance
 }
 
 fn find_black_stones(
@@ -366,6 +483,8 @@ mod tests {
             )
         }
     }
+
+    // TODO: Test the methods based on the input text files.
 }
 
 #[cfg(test)]
@@ -413,5 +532,44 @@ fn debug_stones(w: u32, h: u32, stones: &[BlackStone]) {
 
     image
         .save(format!("stones-v{}.jpeg", env!("CARGO_PKG_VERSION")))
+        .expect("Cannot save image");
+}
+
+#[cfg(test)]
+#[allow(dead_code)]
+fn debug_board(
+    w: u32,
+    h: u32,
+    field_size: f32,
+    center: Point,
+    stones: &HashMap<(i8, i8), Point>,
+) {
+    let field_radius = field_size as u32 / 2;
+    let mut image = image::DynamicImage::new_luma8(w, h);
+    let gray_image = image.as_mut_luma8().unwrap();
+
+    // Draws the fields.
+    for (_, stone) in stones {
+        for y in (stone.y - field_radius)..(stone.y + field_radius) {
+            for x in (stone.x - field_radius)..(stone.x + field_radius) {
+                let pixel = gray_image.get_pixel_mut(x, y);
+                pixel.0 = [255];
+            }
+        }
+    }
+
+    // Draws the lines.
+    for (x, y, pixel) in gray_image.enumerate_pixels_mut() {
+        let diff_x = x.diff(center.x) as f32;
+        let diff_y = y.diff(center.y) as f32;
+        let div_x = diff_x / field_size;
+        let div_y = diff_y / field_size;
+        if div_x.fract() < 0.05 || div_y.fract() < 0.05 {
+            pixel.0 = [128];
+        }
+    }
+
+    image
+        .save(format!("board-v{}.jpeg", env!("CARGO_PKG_VERSION")))
         .expect("Cannot save image");
 }

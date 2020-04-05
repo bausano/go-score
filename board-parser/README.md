@@ -141,3 +141,15 @@ sampled_distances = [
 ]
 divisor_with_least_err ~= 53.4
 ```
+
+We find the center of the board by calculating an average over `x` and `y` of
+all stones. We sort stones based on their distance to the center point. One by
+one we start plotting the stones on a map from which later on we build the board
+state. We filter out stones about which we are unsure to which intersection they
+belong.
+
+![Finding lines](assets/docs/contrast_find_lines.png)
+
+The stones which are depicted here are stone about which the parser is
+confident on which intersection to put them. The center stone is highlighted
+with stronger lines.

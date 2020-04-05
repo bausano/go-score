@@ -1,8 +1,9 @@
+mod board;
 mod num_ext;
-mod xd;
 
 pub fn parse_image(image: image::RgbImage) {
-    xd::xd(&image);
+    let board_map = board::board_map(&image);
+    println!("Here's the board map: {:#?}", board_map);
 }
 
 #[cfg(test)]
@@ -16,7 +17,7 @@ mod tests {
     fn development_test() {
         let assets = &Path::new(ASSETS_DIR);
         let image =
-            image::open(assets.join("test4.jpeg")).expect("Cannot open image");
+            image::open(assets.join("test3.jpeg")).expect("Cannot open image");
         parse_image(image.to_rgb());
     }
 }
