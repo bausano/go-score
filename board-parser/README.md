@@ -120,3 +120,24 @@ We take care of this later on when we calculate a size of the board.
 
 As you can see, we missed some black stones on the board. Since false positives
 are worse than missing a few stones, this is acceptable drawback.
+
+To find an average distance between two adjacent intersections in the board, we
+walk an array of center points of each stone and pair it with in an arbitrary
+way with another stone. The first implementation pairs adjacent stones in
+the array that's returned by the function mentioned above plus first stone with
+the stone in the half of the array, second stone with the stone in the half of
+the array + 1 and so on. We filter out distances which are smaller than mean
+stone size, because those represent stones on the same row/column (the
+difference in `x` or `y` between those stones is about 0). All other distances
+are collected into an array. Next we find a number which divides all those
+distances with the least error. An error is the fractal part of a number after
+division `distance / current_guess`. We minimize the error until the change in
+the current guess is small enough (less than 1px).
+
+```
+stone_size = 42.5
+sampled_distances = [
+  60, 164, 160, 47, 113, 56, 175, 55, 57, 93, 171, 218, 142, 330, 155, 43, 386
+]
+divisor_with_least_err ~= 53.4
+```

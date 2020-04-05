@@ -104,33 +104,66 @@ impl BlackStone {
 }
 
 pub fn xd(image: &image::RgbImage) -> Option<()> {
-    let (mut neighbor_stone_distance, stones) = find_black_stones(image)?;
+    let (stone_size, stones) = find_black_stones(image)?;
     let stones: Vec<_> =
         stones.into_iter().map(|stone| stone.center()).collect();
-    let mut center_distances =
-        Vec::with_capacity((stones.len() - 1) * 2 + stones.len());
 
+    // We will sample distances between stones.
+    // We cannot really estimate exactly how many distances are there going to
+    // be because many stones can be on the same row/column and we avoid adding
+    // distances which are lower than stone size. However since we add 2
+    // distances for each stone and then another 2 distances for each stone in
+    // the first half of the array, we can try to approximate the capacity.
+    let mut center_distances = Vec::with_capacity(2 * stones.len());
+
+    // Adds distances between 2 stones into the array.
+    let mut add_distances = |stone_a: Point, stone_b: Point| {
+        let x_diff = stone_a.x.diff(stone_b.x) as f32;
+        let y_diff = stone_a.y.diff(stone_b.y) as f32;
+
+        // We don't want distances between stones if they are on the same row,
+        // as then x would be around 0.
+        if x_diff > stone_size {
+            center_distances.push(x_diff);
+        }
+
+        // We don't want distances between stones if they are on the same column
+        // as then y would be around 0.
+        if y_diff > stone_size {
+            center_distances.push(y_diff);
+        }
+    };
+
+    let stones_half_count = stones.len() / 2;
     for (i, stone) in stones[0..stones.len() - 2].iter().enumerate() {
         let next_stone = stones[i + 1];
-        center_distances.push(stone.x.diff(next_stone.x) as f32);
-        center_distances.push(stone.y.diff(next_stone.y) as f32);
+        add_distances(*stone, next_stone);
+
+        // The first stone gets pair with a stone in the middle of the array,
+        // second stone with the stone in the middle of the array + 1, and so on
+        // until we reach the middle.
+        if i < stones_half_count {
+            let stone_in_other_half = stones[i + stones_half_count];
+            add_distances(*stone, stone_in_other_half);
+        }
     }
 
-    println!("ok? {}", neighbor_stone_distance);
+    // We're going to try to find a number which divide distances into units.
+    // TODO: Add a cap on how far away stones can be, which is by 19 *
+    // `neighbor_stone_distance`.
+    // TODO: Make sure that the `neighbor_stone_distance` never goes below
+    // `stone_size`.
+    // TODO: Have a hard limit on number of iterations.
+    let mut neighbor_stone_distance = stone_size;
     loop {
         let mut total_change = 0.0;
         for d in &center_distances {
             let div = d / neighbor_stone_distance;
             let closest_int = div.round().max(1.0);
             total_change += d / closest_int - neighbor_stone_distance;
-            println!(
-                "d / closest_int - dist = {} / {} - {}",
-                d, closest_int, neighbor_stone_distance
-            );
         }
         let average_change = total_change / center_distances.len() as f32;
         neighbor_stone_distance += average_change;
-        println!("Hello {}", average_change);
         if average_change.abs() < 1.0 {
             break;
         }
@@ -140,8 +173,6 @@ pub fn xd(image: &image::RgbImage) -> Option<()> {
         "Two stones are neighbors approx by {} pixels.",
         neighbor_stone_distance
     );
-
-    // TODO
 
     Some(())
 }
@@ -218,7 +249,7 @@ fn find_black_stones(
     #[cfg(test)]
     debug_stones(width, height, &stones);
 
-    Some(((mean_height + mean_width), stones))
+    Some(((mean_height + mean_width) / 2.0, stones))
 }
 
 /// Finds objects within given 2D array which has black pixels only. Uses flood
