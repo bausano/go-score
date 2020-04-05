@@ -41,12 +41,12 @@ arbitrarily rotated.
 The algorithm needs to be able to ignore other accessories that might be on the
 photo but is not related to the board.
 
-![Board with accessories](assets/docs/board_with_accessories.jpeg)
+![Board with accessories](assets/docs/board_accessories.jpeg)
 
 There needs to be some give in the angle under which the photo is taken. Ideally
 the board would be viewed from angle 90deg.
 
-![Board from low angle](assets/docs/board_from_low_angle.jpeg)
+![Board from low angle](assets/docs/board_low_angle.jpeg)
 
 ## Testing
 During development we use pictures we took of the go board and evaluate the
@@ -74,3 +74,27 @@ Once we have found some objects which are identified by this equation and their
 `a`, `b` and size match, we can calculate the distances between them to identify
 more stones. Eventually, we will have identified enough stones to be able to say
 what's the spacing between the intersections.
+
+First attempt was to find both black and white stones by iterating over all
+pixels and picking those whose RGB values are below and above some threshold.
+For black stones, this works well. Black seems much easier to capture on the
+photos. To capture white, the threshold needed to around 128 to at least capture
+the outline of a white stone and even that was not enough for some lighting
+conditions.
+
+![Black stones are easy to find, white are not really white](assets/docs/contrast_black_white_stones.png)
+
+However, being able to spot a black stone so easily is a win. To map the board,
+we don't need white stones. Since the purpose is to count score, we can be sure
+that there're going to be many black stones. Next step is therefore to be able
+to identify all black stones. Then we can pick two arbitrary black stones to
+calculate the distance between them. The distance determines the spacing of the
+intersections. We assume that the board is not rotated for now to make progress
+on the algorithm. We iterate row by row, getting views into the original image.
+We already know the black stones. Each intersection we visit, we need to assert
+whether it's an empty territory or a white stone.
+
+The problem has boiled down to categorizing a slice of an image into one of two
+categories: a white stone or an intersection. An intuition guides here and says
+that using machine learning is unnecessary. We can look for a `+` shape or lack
+thereof, or we can use the equation of ellipsis.

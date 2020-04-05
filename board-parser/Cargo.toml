@@ -6,3 +6,4 @@ edition = "2018"
 
 [dependencies]
 score-counter = { path = "../score-counter" }
+image = "0.23"
