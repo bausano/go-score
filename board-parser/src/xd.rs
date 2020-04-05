@@ -2,9 +2,11 @@ use crate::num_ext::*;
 
 const BLACK_THRESHOLD: u8 = 30;
 const GRAYNESS_LIMIT: u8 = 8;
+const MIN_STONE_SIZE: u32 = 5;
 
 pub(crate) type BlackPixels = Vec<Vec<bool>>;
 
+#[derive(Debug)]
 pub struct BlackStone {
     /// The left most point with the lowest y and x value.
     pub top_left: Point,
@@ -12,7 +14,7 @@ pub struct BlackStone {
     pub bottom_right: Point,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct Point {
     pub x: u32,
     pub y: u32,
@@ -83,6 +85,14 @@ impl BlackStone {
         self.bottom_right.x = self.bottom_right.x.max(point.x);
         self.bottom_right.y = self.bottom_right.y.max(point.y);
     }
+
+    fn width(&self) -> u32 {
+        self.bottom_right.x - self.top_left.x
+    }
+
+    fn height(&self) -> u32 {
+        self.bottom_right.y - self.top_left.y
+    }
 }
 
 pub fn find_black_stones(image: &image::RgbImage) -> Vec<BlackStone> {
@@ -108,9 +118,54 @@ pub fn find_black_stones(image: &image::RgbImage) -> Vec<BlackStone> {
         }
     }
 
-    find_black_objects(black_pixels)
+    // #[cfg(test)]
+    // debug_pixels(&black_pixels);
 
-    // TODO: Remove mistakes.
+    let black_objects = find_black_objects(black_pixels);
+    if black_objects.is_empty() {
+        return black_objects;
+    }
+
+    // We collect widths and heights of all objects. Majority of the objects are
+    // going to be black stones because the user is taking a picture of a go
+    // board in an endgame.
+    let mut widths = Vec::with_capacity(black_objects.len());
+    let mut heights = Vec::with_capacity(black_objects.len());
+    for object in &black_objects {
+        widths.push(object.width());
+        heights.push(object.height());
+    }
+
+    // Since majority of objects are stones, we're going to grab the width from
+    // the middle of the array. This is going to be our standard for width for
+    // the rest of the objects.
+    widths.sort();
+    debug_assert_ne!(0, widths.len());
+    let mean_width = widths[widths.len() / 2] as f32;
+
+    // The same applies to the height.
+    heights.sort();
+    debug_assert_ne!(0, heights.len());
+    let mean_height = heights[heights.len() / 2] as f32;
+
+    // Filters out objects which are too big or too small to be a stone.
+    let stones: Vec<_> = black_objects
+        .into_iter()
+        .filter(|object| {
+            let w = object.width() as f32;
+            let h = object.height() as f32;
+
+            w < mean_width * 1.5
+                && w > mean_width * 0.66
+                && h < mean_height * 1.5
+                && h > mean_height * 0.66
+        })
+        .collect();
+
+    // #[cfg(test)]
+    // debug_stones(width, height, &stones);
+
+    stones
 }
 
 /// Finds objects within given 2D array which has black pixels only. Uses flood
@@ -139,7 +194,7 @@ fn find_black_objects(mut image: BlackPixels) -> Vec<BlackStone> {
             false,
         ) {
             let mut object: BlackStone = BlackStone::new(current_point);
-            flood_fill(current_point, &mut object, &mut image);
+            flood_fill(&mut object, &mut image);
             objects.push(object);
         }
 
@@ -154,30 +209,39 @@ fn find_black_objects(mut image: BlackPixels) -> Vec<BlackStone> {
     }
 
     objects
+        .into_iter()
+        // Filters out some noise by removing tiny objects.
+        .filter(|object| {
+            object.width() > MIN_STONE_SIZE || object.height() > MIN_STONE_SIZE
+        })
+        .collect()
 }
 
 /// Recursively finds a single object within given image. It calls this function
 /// for every new highlighted point.
-fn flood_fill(point: Point, object: &mut BlackStone, image: &mut BlackPixels) {
-    // Adds currently iterated point to the object and set that point to no
-    // highlighted.
-    object.push(point);
-    image[point.y as usize][point.x as usize] = false;
+fn flood_fill(object: &mut BlackStone, image: &mut BlackPixels) {
+    let mut point_queue = vec![object.top_left];
+    while let Some(point) = point_queue.pop() {
+        object.push(point);
+        // Adds currently iterated point to the object and set that point to no
+        // highlighted.
+        image[point.y as usize][point.x as usize] = false;
 
-    // Iterates over the Moore neighborhood of currently iterated point.
-    for y in (point.y as isize - 1)..(point.y as isize + 2) {
-        if y < 0 {
-            continue;
-        }
-
-        for x in (point.x as isize - 1)..(point.x as isize + 2) {
-            // If the Moore's point is not highlighted, skips.
-            if x < 0 || !pixel_value(image, x, y, false) {
+        // Iterates over the Moore neighborhood of currently iterated point.
+        for y in (point.y as isize - 1)..(point.y as isize + 2) {
+            if y < 0 {
                 continue;
             }
 
-            // Visits the Moore's point.
-            flood_fill(Point::new(x as u32, y as u32), object, image);
+            for x in (point.x as isize - 1)..(point.x as isize + 2) {
+                // If the Moore's point is not highlighted, skips.
+                if x < 0 || !pixel_value(image, x, y, false) {
+                    continue;
+                }
+
+                // Visits the Moore's point.
+                point_queue.push(Point::new(x as u32, y as u32));
+            }
         }
     }
 }
@@ -187,13 +251,18 @@ mod tests {
     use super::*;
 
     const ASSETS_DIR: &str = "assets/test";
+
+    // Note that actual number of stones differs from these numbers. These are
+    // the counts which is my algorithm able to tell. We don't need to be
+    // precise and we rather sacrifice in precise number of stones for less
+    // false positives.
     const TEST_BLACK_STONE_COUNTS: &[(&str, usize)] = &[
         ("test1", 4),
-        ("test2", 9),
+        ("test2", 10),
         ("test3", 9),
-        ("test4", 13),
-        ("test5", 18),
-        ("test6", 18),
+        ("test4", 14),
+        ("test5", 17),
+        ("test6", 17),
         ("test7", 2),
         ("test8", 2),
     ];
@@ -203,12 +272,61 @@ mod tests {
         for (test, count) in TEST_BLACK_STONE_COUNTS {
             let image = image::open(format!("{}/{}.jpeg", ASSETS_DIR, test))
                 .expect("Cannot open image");
-            let stones_count = find_black_stones(&image.to_rgb()).len();
+            let stones = find_black_stones(&image.to_rgb());
             assert_eq!(
-                stones_count, *count,
+                stones.len(),
+                *count,
                 "test file {} has a mismatched count of black stones",
-                test
+                test,
             )
         }
     }
+}
+
+#[cfg(test)]
+#[allow(dead_code)]
+fn debug_pixels(black_pixels: &BlackPixels) {
+    let mut image = image::DynamicImage::new_luma8(
+        black_pixels[0].len() as u32,
+        black_pixels.len() as u32,
+    );
+    let gray_image = image.as_mut_luma8().unwrap();
+
+    for (x, y, pixel) in gray_image.enumerate_pixels_mut() {
+        let is_pixel_black = black_pixels
+            .get(y as usize)
+            .unwrap()
+            .get(x as usize)
+            .unwrap();
+
+        if *is_pixel_black {
+            pixel.0 = [0];
+        } else {
+            pixel.0 = [255];
+        }
+    }
+
+    image
+        .save(format!("pixels-v{}.jpeg", env!("CARGO_PKG_VERSION")))
+        .expect("Cannot save image");
+}
+
+#[cfg(test)]
+#[allow(dead_code)]
+fn debug_stones(w: u32, h: u32, stones: &[BlackStone]) {
+    let mut image = image::DynamicImage::new_luma8(w, h);
+    let gray_image = image.as_mut_luma8().unwrap();
+
+    for stone in stones {
+        for y in stone.top_left.y..stone.bottom_right.y {
+            for x in stone.top_left.x..stone.bottom_right.x {
+                let pixel = gray_image.get_pixel_mut(x, y);
+                pixel.0 = [255];
+            }
+        }
+    }
+
+    image
+        .save(format!("stones-v{}.jpeg", env!("CARGO_PKG_VERSION")))
+        .expect("Cannot save image");
 }

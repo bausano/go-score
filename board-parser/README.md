@@ -98,3 +98,25 @@ The problem has boiled down to categorizing a slice of an image into one of two
 categories: a white stone or an intersection. An intuition guides here and says
 that using machine learning is unnecessary. We can look for a `+` shape or lack
 thereof, or we can use the equation of ellipsis.
+
+After filtering out noise and items which were not fit as stones (were too big
+or small in comparison with the mean object on the photo, which we assume is
+a stone), we have a highlight of black stones on the photo. The algorithm at
+this point is quite sure that most of the highlighted items are stones. However
+there might be stones outside of the board which are still visible on the photo.
+We take care of this later on when we calculate a size of the board.
+
+**Input**
+
+![Illustrative input image](assets/docs/contrast_input.jpeg)
+
+**Black pixels**
+
+![All the black pixels](assets/docs/contrast_black_pixels.jpeg)
+
+**Black stones**
+
+![All the black pixels](assets/docs/contrast_black_stones.jpeg)
+
+As you can see, we missed some black stones on the board. Since false positives
+are worse than missing a few stones, this is acceptable drawback.
