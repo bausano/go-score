@@ -1,4 +1,7 @@
+#[cfg(test)]
+use crate::debug;
 use crate::num_ext::*;
+use std::cmp::Ordering;
 use std::collections::HashMap;
 
 const BLACK_THRESHOLD: u8 = 30;
@@ -7,25 +10,42 @@ const MIN_STONE_SIZE: u32 = 5;
 const MIN_BLACK_STONES_ON_BOARD: usize = 6;
 
 pub type BoardMap = HashMap<(i8, i8), Point>;
-type BlackPixels = Vec<Vec<bool>>;
+pub(crate) type BlackPixels = Vec<Vec<bool>>;
 
 #[derive(Debug)]
-struct BlackStone {
+pub(crate) struct BlackStone {
     /// The left most point with the lowest y and x value.
-    top_left: Point,
+    pub top_left: Point,
     /// The right most point with the highest y and x value.
-    bottom_right: Point,
+    pub bottom_right: Point,
 }
 
 #[derive(Copy, Clone, Debug)]
 pub struct Point {
-    x: u32,
-    y: u32,
+    pub x: u32,
+    pub y: u32,
 }
 
 impl Point {
     fn new(x: u32, y: u32) -> Point {
         Point { x, y }
+    }
+
+    // A number between 0 to 1 which says how far off are two stones to form a
+    // grid given a distance between two intersections in the grid.
+    fn error_in_grid(self, other: Self, grid_unit: f32) -> f32 {
+        let diff_x = self.x.diff(other.x) as f32;
+        let diff_y = self.y.diff(other.y) as f32;
+        let div_x = diff_x / grid_unit;
+        let div_y = diff_y / grid_unit;
+
+        // For example an error for numbers 7.6 and 5.2 is .4 + .2 = 0.6
+        // We get abs value after sub from .5. The lower the error the higher
+        // this value.
+        // |.5 - .6| = .1
+        // |.5 - .2| = .3
+        // 1 - .1 - .3 = .6
+        1.0 - (0.5 - div_y.fract()).abs() - (0.5 - div_x.fract()).abs()
     }
 }
 
@@ -202,14 +222,54 @@ pub fn board_map(image: &image::RgbImage) -> Option<BoardMap> {
         })
         .collect();
     stones_with_distance_to_center.sort_by(|(a, _), (b, _)| a.cmp(b));
-    let (_, board_center_point) = stones_with_distance_to_center[0];
-    let board_center_point = *board_center_point;
-    let mut board: HashMap<(i8, i8), Point> = HashMap::with_capacity(19);
-    board.insert((0, 0), board_center_point);
+
+    // From first three stones, finds the one which has the least error to all
+    // other stones.
+    let (avg_e, least_err_stone) = stones_with_distance_to_center[0..3]
+        .iter()
+        .map(|(_, stone)| {
+            let total_error_to_other_stones = stones_with_distance_to_center
+                .iter()
+                .fold(0.0, |sum, (_, another_stone)| {
+                    sum + stone.error_in_grid(
+                        **another_stone,
+                        adjacent_intersection_distance,
+                    )
+                });
+            (
+                // Calculates average error to other stones.
+                total_error_to_other_stones
+                    / stones_with_distance_to_center.len() as f32,
+                stone,
+            )
+        })
+        .min_by(|(total_e, _), (another_total_e, _)| {
+            if total_e > another_total_e {
+                Ordering::Greater
+            } else {
+                Ordering::Less
+            }
+        })
+        .map(|(avg_e, p)| (avg_e, **p))
+        .unwrap();
+
+    // Creates a new map which will hold all stones. Since we position the stone
+    // which we think has least error to other stones in the center, there are
+    // going to be stones which are on intersections below and to the left of
+    // the center stone. Therefore we use i8 and minus sign.
+    let mut board: HashMap<(i8, i8), Point> =
+        HashMap::with_capacity(stones.len());
+    board.insert((0, 0), least_err_stone);
+
+    // And once again we calculate an error of every stone to that stone. Very
+    // wasteful but oh well. I think we can leverage dynamic programming
+    // techniques here at this point. Because we'd like to be able to reuse
+    // errors as much as possible.
+    let mut stones_with_high_error = Vec::new();
     for (_, stone) in stones_with_distance_to_center {
         let stone = *stone;
-        let diff_x = stone.x.diff(board_center_point.x) as f32;
-        let diff_y = stone.y.diff(board_center_point.y) as f32;
+        let diff_x = stone.x.diff(least_err_stone.x) as f32;
+        let diff_y = stone.y.diff(least_err_stone.y) as f32;
         let div_x = diff_x / adjacent_intersection_distance;
         let div_y = diff_y / adjacent_intersection_distance;
 
@@ -226,18 +286,19 @@ pub fn board_map(image: &image::RgbImage) -> Option<BoardMap> {
         // |.5 - .2| = .3
         // 1 - .1 - .3 = .6
         let e = 1.0 - (0.5 - div_y.fract()).abs() - (0.5 - div_x.fract()).abs();
-        if e > 0.5 {
+        if e > avg_e {
             // This stone is positioned weirdly. Needs more heuristics based on
             // other points in the hash map. Easier is to skip it and rely on
             // sieves later on which are aware of the fact that some black
             // stones were not found during this phase.
+            stones_with_high_error.push(stone);
             continue;
         }
 
         // If the stone is higher than center point, the row is negative.
         let row = if div_y == 0.0 {
             0
-        } else if stone.y > board_center_point.y {
+        } else if stone.y > least_err_stone.y {
             div_y.round() as i8
         } else {
             -div_y.round() as i8
@@ -246,7 +307,7 @@ pub fn board_map(image: &image::RgbImage) -> Option<BoardMap> {
         // If the stone is more to left than center point, the col is negative.
         let column = if div_x == 0.0 {
             0
-        } else if stone.x > board_center_point.x {
+        } else if stone.x > least_err_stone.x {
             div_x.round() as i8
         } else {
             -div_x.round() as i8
@@ -255,12 +316,17 @@ pub fn board_map(image: &image::RgbImage) -> Option<BoardMap> {
         board.insert((column, row), stone);
     }
 
+    println!(
+        "Now we need to figure out what to do with these: {:?}",
+        stones_with_high_error
+    );
+
     #[cfg(test)]
-    debug_board(
+    debug::board(
         image.width(),
         image.height(),
         adjacent_intersection_distance,
-        board_center_point,
+        least_err_stone,
         &board,
     );
 
@@ -319,6 +385,9 @@ fn find_black_stones(
         }
     }
 
+    #[cfg(test)]
+    debug::pixels(&black_pixels);
+
     let black_objects = find_black_objects(black_pixels);
     if black_objects.is_empty() {
         return None;
@@ -359,6 +428,9 @@ fn find_black_stones(
                 && h > mean_height * 0.66
         })
         .collect();
+
+    #[cfg(test)]
+    debug::stones(width, height, &stones);
 
     Some(((mean_height + mean_width) / 2.0, stones))
 }
@@ -442,8 +514,8 @@ fn flood_fill(object: &mut BlackStone, image: &mut BlackPixels) {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
+pub mod tests {
+    pub use super::*;
     use std::cmp::Ordering;
     use std::fs;
 
@@ -568,19 +640,26 @@ mod tests {
                 .keys()
                 .copied()
                 .collect();
-            // Finds the lowest value of either x or y and that's going to
+            // Finds the lowest value of either x and y and that's going to
             // become the value 0 now. All other xs and ys are going to be
             // incremented by this value.
-            let min = {
-                let (min_x, min_y) = black_stones_found
+            let min_x = {
+                let (min_x, _) = black_stones_found
                     .iter()
-                    .min_by_key(|(x, y)| x.min(y))
+                    .min_by(|(xa, _), (xb, _)| xa.cmp(xb))
                     .unwrap();
-                min_x.min(min_y).abs()
+                min_x.abs()
+            };
+            let mix_y = {
+                let (_, min_y) = black_stones_found
+                    .iter()
+                    .min_by(|(_, ya), (_, yb)| ya.cmp(yb))
+                    .unwrap();
+                min_y.abs()
             };
             let mut black_stones_found: Vec<_> = black_stones_found
                 .into_iter()
-                .map(|(x, y)| ((x + min) as u8, (y + min) as u8))
+                .map(|(x, y)| ((x + min_x) as u8, (y + mix_y) as u8))
                 .collect();
 
             // Sorts given slice of (x, y) in a way that the left most stones
@@ -594,45 +673,13 @@ mod tests {
 
             sort_stones(&mut black_stones_on_board);
             sort_stones(&mut black_stones_found);
+
+            println!(
+                "here are two two things: \n{:?}\n\n{:?}",
+                black_stones_found, black_stones_on_board
+            );
+
+            panic!()
         }
     }
-}
-
-#[cfg(test)]
-#[allow(dead_code)]
-fn debug_board(
-    w: u32,
-    h: u32,
-    field_size: f32,
-    center: Point,
-    stones: &HashMap<(i8, i8), Point>,
-) {
-    let field_radius = field_size as u32 / 2;
-    let mut image = image::DynamicImage::new_luma8(w, h);
-    let gray_image = image.as_mut_luma8().unwrap();
-
-    // Draws the fields.
-    for (_, stone) in stones {
-        for y in (stone.y - field_radius)..(stone.y + field_radius) {
-            for x in (stone.x - field_radius)..(stone.x + field_radius) {
-                let pixel = gray_image.get_pixel_mut(x, y);
-                pixel.0 = [255];
-            }
-        }
-    }
-
-    // Draws the lines.
-    for (x, y, pixel) in gray_image.enumerate_pixels_mut() {
-        let diff_x = x.diff(center.x) as f32;
-        let diff_y = y.diff(center.y) as f32;
-        let div_x = diff_x / field_size;
-        let div_y = diff_y / field_size;
-        if div_x.fract() < 0.05 || div_y.fract() < 0.05 {
-            pixel.0 = [128];
-        }
-    }
-
-    image
-        .save(format!("board-v{}.jpeg", env!("CARGO_PKG_VERSION")))
-        .expect("Cannot save image");
 }

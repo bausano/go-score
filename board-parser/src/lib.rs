@@ -1,4 +1,6 @@
 mod board;
+#[cfg(test)]
+mod debug;
 mod num_ext;
 
 pub fn parse_image(image: image::RgbImage) {
