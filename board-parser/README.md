@@ -56,7 +56,6 @@ constellations. We can then use this data set to validate that the algorithm
 yields satisfying results.
 
 ## Approaches
-### Contrast highlighting and finding elliptical objects
 We focus on the fact that the stones are going to be black and white. Therefore
 we can rule out pixels which are coloured. We now have a picture which contains
 black stones, white stones, board lines and noise. To rule out noise, we can
@@ -153,3 +152,20 @@ belong.
 The stones which are depicted here are stone about which the parser is
 confident on which intersection to put them. The center stone is highlighted
 with stronger lines.
+
+While this solution worked well when the board was aligned with the x and y
+axes, it broke quite if the board was slightly rotated. We pursued this
+algorithm to have some basic benchmarks to improve on. However it doesn't yield
+good enough results to make it worth it to continue developing it.
+
+![Average distance is not performing well](assets/docs/average_distance_error.png)
+
+We will keep the contrast finding black stones, however we discard the average
+distance algorithm. Instead, we develop an algorithm which tries to find a
+transformation that has the least error against measured centers of the black
+stones when applied to a lattice. We start with a linear transformation for
+simplicity. Although linear transformation won't address the inclination, it
+will help with rotation around the center of the board. Presently, that also
+seems like bigger issue because the size of the board won't change too much with
+different inclination unless the user is taking a close up picture. But a close
+up picture most likely won't capture the whole board.
