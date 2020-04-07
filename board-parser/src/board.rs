@@ -319,9 +319,6 @@ fn find_black_stones(
         }
     }
 
-    // #[cfg(test)]
-    // debug_pixels(&black_pixels);
-
     let black_objects = find_black_objects(black_pixels);
     if black_objects.is_empty() {
         return None;
@@ -362,9 +359,6 @@ fn find_black_stones(
                 && h > mean_height * 0.66
         })
         .collect();
-
-    #[cfg(test)]
-    debug_stones(width, height, &stones);
 
     Some(((mean_height + mean_width) / 2.0, stones))
 }
@@ -602,54 +596,6 @@ mod tests {
             sort_stones(&mut black_stones_found);
         }
     }
-}
-
-#[cfg(test)]
-#[allow(dead_code)]
-fn debug_pixels(black_pixels: &BlackPixels) {
-    let mut image = image::DynamicImage::new_luma8(
-        black_pixels[0].len() as u32,
-        black_pixels.len() as u32,
-    );
-    let gray_image = image.as_mut_luma8().unwrap();
-
-    for (x, y, pixel) in gray_image.enumerate_pixels_mut() {
-        let is_pixel_black = black_pixels
-            .get(y as usize)
-            .unwrap()
-            .get(x as usize)
-            .unwrap();
-
-        if *is_pixel_black {
-            pixel.0 = [0];
-        } else {
-            pixel.0 = [255];
-        }
-    }
-
-    image
-        .save(format!("pixels-v{}.jpeg", env!("CARGO_PKG_VERSION")))
-        .expect("Cannot save image");
-}
-
-#[cfg(test)]
-#[allow(dead_code)]
-fn debug_stones(w: u32, h: u32, stones: &[BlackStone]) {
-    let mut image = image::DynamicImage::new_luma8(w, h);
-    let gray_image = image.as_mut_luma8().unwrap();
-
-    for stone in stones {
-        for y in stone.top_left.y..stone.bottom_right.y {
-            for x in stone.top_left.x..stone.bottom_right.x {
-                let pixel = gray_image.get_pixel_mut(x, y);
-                pixel.0 = [255];
-            }
-        }
-    }
-
-    image
-        .save(format!("stones-v{}.jpeg", env!("CARGO_PKG_VERSION")))
-        .expect("Cannot save image");
 }
 
 #[cfg(test)]
