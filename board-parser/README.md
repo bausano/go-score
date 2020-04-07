@@ -14,8 +14,8 @@ fourth intersection on the second row on a 19x19 board is annotated as
 
 The stones are places on the intersections. There are two players in go. A move
 is placement of a player's coloured stone on the go board, i. e. one player puts
-down only black stones and the other only white stones. Black and white stones
-are the most common type of stone.
+down only black stones and the other only white stones. Most commonly people
+have their stoned coloured in black and white.
 
 ![Black and white stones](assets/docs/stones.jpeg)
 

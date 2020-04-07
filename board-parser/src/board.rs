@@ -450,8 +450,62 @@ fn flood_fill(object: &mut BlackStone, image: &mut BlackPixels) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cmp::Ordering;
+    use std::fs;
 
     const ASSETS_DIR: &str = "assets/test";
+
+    #[derive(Eq, PartialEq)]
+    enum Intersection {
+        BlackStone,
+        WhiteStone,
+        Empty,
+    }
+
+    struct BoardFile {
+        inner: Vec<Vec<Intersection>>,
+    }
+
+    impl BoardFile {
+        fn new(test_name: &str) -> Self {
+            let file = fs::read(format!("{}/{}.txt", ASSETS_DIR, test_name))
+                .expect("Cannot read test file");
+            let file = String::from_utf8_lossy(&file);
+            let inner = file
+                .lines()
+                .map(|l| {
+                    l.chars()
+                        .map(|c| match c {
+                            'x' => Intersection::Empty,
+                            '1' => Intersection::WhiteStone,
+                            '0' => Intersection::BlackStone,
+                            _ => panic!("Unrecognized board char"),
+                        })
+                        .collect()
+                })
+                .collect();
+
+            Self { inner }
+        }
+
+        // Get positions of all black stones.
+        fn black_stones(&self) -> Vec<(u8, u8)> {
+            self.inner
+                .iter()
+                .enumerate()
+                .map(|(y, row)| {
+                    row.iter()
+                        .enumerate()
+                        .filter(|(_, intersection)| {
+                            **intersection == Intersection::BlackStone
+                        })
+                        .map(|(x, _)| (x as u8, y as u8))
+                        .collect::<Vec<(u8, u8)>>()
+                })
+                .flatten()
+                .collect()
+        }
+    }
 
     // Note that actual number of stones differs from these numbers. These are
     // the counts which is my algorithm able to tell. We don't need to be
@@ -484,7 +538,70 @@ mod tests {
         }
     }
 
-    // TODO: Test the methods based on the input text files.
+    // A name of test file and whether the algorithm is supposed to find any
+    // stones in them. Note that there must be at least about 6 black stones for
+    // the algorithm to work.
+    const TEST_IMAGES: &[(&str, bool)] = &[
+        ("test1", false),
+        ("test2", true),
+        ("test3", true),
+        ("test4", true),
+        ("test5", true),
+        ("test6", true),
+        ("test7", false),
+        ("test8", false),
+    ];
+
+    #[test]
+    fn test_place_black_stones_on_intersections() {
+        for (test, should_yield_board) in TEST_IMAGES {
+            println!("Running {}", test);
+            let image = image::open(format!("{}/{}.jpeg", ASSETS_DIR, test))
+                .expect("Cannot open image");
+            let board = board_map(&image.to_rgb());
+            if !should_yield_board {
+                assert!(board.is_none());
+                continue;
+            }
+
+            // Loads the file which has a text representation of the actual
+            // board.
+            let mut black_stones_on_board = BoardFile::new(test).black_stones();
+
+            // Gets the black stones.
+            let black_stones_found: Vec<_> = board
+                .expect("Algorithm should be able to find stones")
+                .keys()
+                .copied()
+                .collect();
+            // Finds the lowest value of either x or y and that's going to
+            // become the value 0 now. All other xs and ys are going to be
+            // incremented by this value.
+            let min = {
+                let (min_x, min_y) = black_stones_found
+                    .iter()
+                    .min_by_key(|(x, y)| x.min(y))
+                    .unwrap();
+                min_x.min(min_y).abs()
+            };
+            let mut black_stones_found: Vec<_> = black_stones_found
+                .into_iter()
+                .map(|(x, y)| ((x + min) as u8, (y + min) as u8))
+                .collect();
+
+            // Sorts given slice of (x, y) in a way that the left most stones
+            // are in the beginning.
+            let sort_stones = |stones: &mut [(u8, u8)]| {
+                stones.sort_by(|(xa, ya), (xb, yb)| match xa.cmp(xb) {
+                    Ordering::Equal => ya.cmp(yb),
+                    ordering => ordering,
+                });
+            };
+
+            sort_stones(&mut black_stones_on_board);
+            sort_stones(&mut black_stones_found);
+        }
+    }
 }
 
 #[cfg(test)]
