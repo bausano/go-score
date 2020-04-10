@@ -169,3 +169,32 @@ will help with rotation around the center of the board. Presently, that also
 seems like bigger issue because the size of the board won't change too much with
 different inclination unless the user is taking a close up picture. But a close
 up picture most likely won't capture the whole board.
+
+We have four parameters which we want to fiddle around with to minimize an
+error. Two are in the matrix for linear transformation of our lattice. Third and
+forth are the `x` and `y` positions of the (0, 0) coordinate for the lattice
+within the picture.
+
+![Linear transformation a & b, -b & a](assets/docs/linear_transformation.png)
+
+We only need two parameters to the LT because the go board is made of squares
+which are rotated around a center point (remember that we ignore inclination for
+now).
+
+There are multiple ways for minimizing the error between intersections on the
+lattice and the centers of the black stones.
+
+We could in each iteration calculate change in error for `da`, `db`, `dx` and
+`dy` and choose to change the variable which minimizes the error the most. This
+means there's a lot of wasted effort.
+
+We could have cycles where first we minimize error by applying `da`, in next
+cycle `db` and so on.
+
+Generally it's also difficult to say in which direction should the
+change happen. Also the size of the change is not clear.
+
+<!-- Invisible List of References -->
+[linear-transformation]: http://www.sciweavers.org/free-online-latex-equation-editor
+[latex-editor]: http://www.sciweavers.org/free-online-latex-equation-editor
+[geogebra-linear-transformation-visualization]: https://www.geogebra.org/m/YCZa8TAH
