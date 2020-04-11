@@ -15,3 +15,4 @@ where
 
 impl NumExt for u8 {}
 impl NumExt for u32 {}
+impl NumExt for f32 {}

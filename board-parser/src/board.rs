@@ -202,135 +202,30 @@ pub fn board_map(image: &image::RgbImage) -> Option<BoardMap> {
         adjacent_intersection_distance
     );
 
-    let mut total_x = 0;
-    let mut total_y = 0;
-    for stone in &stones {
-        total_x += stone.x;
-        total_y += stone.y;
-    }
-    let board_center_point = Point::new(
-        total_x / stones.len() as u32,
-        total_y / stones.len() as u32,
-    );
-
-    let mut stones_with_distance_to_center: Vec<_> = stones
-        .iter()
-        .map(|stone| {
-            let diff_x = stone.x.diff(board_center_point.x);
-            let diff_y = stone.y.diff(board_center_point.y);
-            (diff_x * diff_x + diff_y * diff_y, stone)
-        })
-        .collect();
-    stones_with_distance_to_center.sort_by(|(a, _), (b, _)| a.cmp(b));
-
-    // From first three stones, finds the one which has the least error to all
-    // other stones.
-    let (avg_e, least_err_stone) = stones_with_distance_to_center[0..3]
-        .iter()
-        .map(|(_, stone)| {
-            let total_error_to_other_stones = stones_with_distance_to_center
-                .iter()
-                .fold(0.0, |sum, (_, another_stone)| {
-                    sum + stone.error_in_grid(
-                        **another_stone,
-                        adjacent_intersection_distance,
-                    )
-                });
-            (
-                // Calculates average error to other stones.
-                total_error_to_other_stones
-                    / stones_with_distance_to_center.len() as f32,
-                stone,
-            )
-        })
-        .min_by(|(total_e, _), (another_total_e, _)| {
-            if total_e > another_total_e {
-                Ordering::Greater
-            } else {
-                Ordering::Less
-            }
-        })
-        .map(|(avg_e, p)| (avg_e, **p))
-        .unwrap();
-
-    // Creates a new map which will hold all stones. Since we position the stone
-    // which we think has least error to other stones in the center, there are
-    // going to be stones which are on intersections below and to the left of
-    // the center stone. Therefore we use i8 and minus sign.
-    let mut board: HashMap<(i8, i8), Point> =
-        HashMap::with_capacity(stones.len());
-    board.insert((0, 0), least_err_stone);
-
-    // And once again we calculate an error of every stone to that stone. Very
-    // wasteful but oh well. I think we can leverage dynamic programming
-    // techniques here at this point. Because we'd like to be able to reuse
-    // errors as much as possible.
-    let mut stones_with_high_error = Vec::new();
-    for (_, stone) in stones_with_distance_to_center {
-        let stone = *stone;
-        let diff_x = stone.x.diff(least_err_stone.x) as f32;
-        let diff_y = stone.y.diff(least_err_stone.y) as f32;
-        let div_x = diff_x / adjacent_intersection_distance;
-        let div_y = diff_y / adjacent_intersection_distance;
-
-        // If the distance between the center point is more than the possible
-        // board size, we can rule it out immediately.
-        if div_x > 20.0 || div_y > 20.0 {
-            continue;
-        }
-
-        // For example an error for numbers 7.6 and 5.2 is .4 + .2 = 0.6
-        // We get abs value after sub from .5. The lower the error the higher
-        // this value.
-        // |.5 - .6| = .1
-        // |.5 - .2| = .3
-        // 1 - .1 - .3 = .6
-        let e = 1.0 - (0.5 - div_y.fract()).abs() - (0.5 - div_x.fract()).abs();
-        if e > avg_e {
-            // This stone is positioned weirdly. Needs more heuristics based on
-            // other points in the hash map. Easier is to skip it and rely on
-            // sieves later on which are aware of the fact that some black
-            // stones were not found during this phase.
-            stones_with_high_error.push(stone);
-            continue;
-        }
-
-        // If the stone is higher than center point, the row is negative.
-        let row = if div_y == 0.0 {
-            0
-        } else if stone.y > least_err_stone.y {
-            div_y.round() as i8
-        } else {
-            -div_y.round() as i8
-        };
-
-        // If the stone is more to left than center point, the col is negative.
-        let column = if div_x == 0.0 {
-            0
-        } else if stone.x > least_err_stone.x {
-            div_x.round() as i8
-        } else {
-            -div_x.round() as i8
-        };
-
-        board.insert((column, row), stone);
-    }
-
-    println!(
-        "Now we need to figure out what to do with these: {:?}",
-        stones_with_high_error
-    );
+    let a = 1.0;
+    let b = 0.5;
+    let inv_a = 1.0;
+    let inv_b = -0.3;
 
     #[cfg(test)]
-    debug::board(
-        image.width(),
-        image.height(),
+    debug::board_on_image(
+        &image,
         adjacent_intersection_distance,
-        least_err_stone,
-        &board,
+        &stones,
+        |x, y| {
+            let sx = x as f32;
+            let sy = y as f32;
+            let x = 5.0 * inv_a * sx - inv_b * sy;
+            let y = 0.5 * inv_a * sy + inv_b * sx;
+            let diff_x = x.diff(25.0) as f32;
+            let diff_y = y.diff(25.0) as f32;
+            let div_x = diff_x.powf(1.1) / adjacent_intersection_distance;
+            let div_y = diff_y.powf(0.5) / adjacent_intersection_distance;
+            div_x.fract() < 0.05 || div_y.fract() < 0.05
+        },
     );
 
-    Some(board)
+    None
 }
 
 // We're going to try to find a number which divide distances into units.
