@@ -202,10 +202,12 @@ pub fn board_map(image: &image::RgbImage) -> Option<BoardMap> {
         adjacent_intersection_distance
     );
 
-    let a = 1.0;
-    let b = 0.5;
-    let inv_a = 1.0;
-    let inv_b = -0.3;
+    let a = 1.0 / 10000.0;
+    let b = 1.0 / 15000.0;
+    let cx = 775.0;
+    let cy = 345.0;
+    let sx = 56.4;
+    let sy = 53.8;
 
     #[cfg(test)]
     debug::board_on_image(
@@ -213,15 +215,15 @@ pub fn board_map(image: &image::RgbImage) -> Option<BoardMap> {
         adjacent_intersection_distance,
         &stones,
         |x, y| {
-            let sx = x as f32;
-            let sy = y as f32;
-            let x = 5.0 * inv_a * sx - inv_b * sy;
-            let y = 0.5 * inv_a * sy + inv_b * sx;
-            let diff_x = x.diff(25.0) as f32;
-            let diff_y = y.diff(25.0) as f32;
-            let div_x = diff_x.powf(1.1) / adjacent_intersection_distance;
-            let div_y = diff_y.powf(0.5) / adjacent_intersection_distance;
-            div_x.fract() < 0.05 || div_y.fract() < 0.05
+            let x = x as f32;
+            let y = y as f32;
+            let x = x - cx;
+            let y = y - cy;
+            let x = x - a * y * x;
+            let div_x = x / sx;
+            let y = y - b * y * x;
+            let div_y = y / sy;
+            div_x.fract().abs() < 0.02 || div_y.fract().abs() < 0.02
         },
     );
 
