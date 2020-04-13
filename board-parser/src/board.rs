@@ -29,23 +29,6 @@ impl Point {
     fn new(x: u32, y: u32) -> Point {
         Point { x, y }
     }
-
-    // A number between 0 to 1 which says how far off are two stones to form a
-    // grid given a distance between two intersections in the grid.
-    fn error_in_grid(self, other: Self, grid_unit: f32) -> f32 {
-        let diff_x = self.x.diff(other.x) as f32;
-        let diff_y = self.y.diff(other.y) as f32;
-        let div_x = diff_x / grid_unit;
-        let div_y = diff_y / grid_unit;
-
-        // For example an error for numbers 7.6 and 5.2 is .4 + .2 = 0.6
-        // We get abs value after sub from .5. The lower the error the higher
-        // this value.
-        // |.5 - .6| = .1
-        // |.5 - .2| = .3
-        // 1 - .1 - .3 = .6
-        1.0 - (0.5 - div_y.fract()).abs() - (0.5 - div_x.fract()).abs()
-    }
 }
 
 impl std::ops::Add for Point {
@@ -120,7 +103,7 @@ impl BlackStone {
 }
 
 pub fn board_map(image: &image::RgbImage) -> Option<BoardMap> {
-    let (stone_size, stones) = find_black_stones(image)?;
+    let (_stone_size, stones) = find_black_stones(image)?;
     // From now on we're only concerned about the center points.
     let stones: Vec<_> =
         stones.into_iter().map(|stone| stone.center()).collect();
@@ -129,71 +112,6 @@ pub fn board_map(image: &image::RgbImage) -> Option<BoardMap> {
     if stones.len() < MIN_BLACK_STONES_ON_BOARD {
         return None;
     }
-
-    // We will sample distances between stones.
-    // We cannot really estimate exactly how many distances are there going to
-    // be because many stones can be on the same row/column and we avoid adding
-    // distances which are lower than stone size. However since we add 2
-    // distances for each stone and then another 2 distances for each stone in
-    // the first half of the array, we can try to approximate the capacity.
-    // Then we also put distances between the first and last, second and second
-    // to last, etc.
-    let mut sampled_distances = Vec::with_capacity(6 * stones.len());
-
-    // Adds distances between 2 stones into the array.
-    let mut add_distances = |stone_a: Point, stone_b: Point| {
-        let x_diff = stone_a.x.diff(stone_b.x) as f32;
-        let y_diff = stone_a.y.diff(stone_b.y) as f32;
-
-        // We don't want distances between stones if they are on the same row,
-        // as then x would be around 0.
-        if x_diff > stone_size {
-            sampled_distances.push(x_diff);
-        }
-
-        // We don't want distances between stones if they are on the same column
-        // as then y would be around 0.
-        if y_diff > stone_size {
-            sampled_distances.push(y_diff);
-        }
-    };
-
-    let stones_half_count = stones.len() / 2;
-    for (i, stone) in stones[0..stones.len() - 2].iter().enumerate() {
-        let stone = *stone;
-
-        // These are going to be most likely stones which are adjacent on rows.
-        let next_stone = stones[i + 1];
-        add_distances(stone, next_stone);
-
-        // These stones are going to have the greatest distances. This is going
-        // to be important as a heuristics later on. If there are enough
-        // distances which are larger than 13 intersections apart, we say that
-        // the board is 19x19.
-        let far_away_stone = stones[stones.len() - i - 1];
-        add_distances(stone, far_away_stone);
-
-        // The first stone gets pair with a stone in the middle of the array,
-        // second stone with the stone in the middle of the array + 1, and so on
-        // until we reach the middle.
-        if i < stones_half_count {
-            let stone_in_other_half = stones[i + stones_half_count];
-            add_distances(stone, stone_in_other_half);
-        }
-    }
-
-    // How far away are two stones which are places next to each other.
-    // Starts as a stone size and finds a more appropriate value.
-    let adjacent_intersection_distance =
-        average_distance_between_adjacent_intersections(
-            &sampled_distances,
-            stone_size,
-        );
-
-    println!(
-        "Two stones are neighbors approx by {} pixels.",
-        adjacent_intersection_distance
-    );
 
     let a = -1.0 / 10000.0;
     let b = -1.0 / 4000.0;
@@ -204,28 +122,25 @@ pub fn board_map(image: &image::RgbImage) -> Option<BoardMap> {
     let asx = -1.0 / 110.0;
     let asy = 0.0;
 
-    transformation_error(&stones, cx, cy, a, b, sx, sy, asx, asy);
+    let e = transformation_error(&stones, cx, cy, a, b, sx, sy, asx, asy);
+
+    println!("This transformation has an error of {}", e);
 
     // 8 parameters to get right.
     // rotation????????/
 
     #[cfg(test)]
-    debug::board_on_image(
-        &image,
-        adjacent_intersection_distance,
-        &stones,
-        |x, y| {
-            let x = x as f32;
-            let y = y as f32;
-            let x = x - cx;
-            let y = y - cy;
-            let x = x - a * y * x;
-            let div_x = x / (sx + asx * x);
-            let y = y - b * y * x;
-            let div_y = y / (sy + asy * y);
-            div_x.fract().abs() < 0.02 || div_y.fract().abs() < 0.02
-        },
-    );
+    debug::highlight_pixels_in_image(&image, |x, y| {
+        let x = x as f32;
+        let y = y as f32;
+        let x = x - cx;
+        let y = y - cy;
+        let x = x - a * y * x;
+        let div_x = x / (sx + asx * x);
+        let y = y - b * y * x;
+        let div_y = y / (sy + asy * y);
+        div_x.fract().abs() < 0.02 || div_y.fract().abs() < 0.02
+    });
 
     None
 }
@@ -332,33 +247,6 @@ fn transformation_error(
 
     // Average error.
     total_e / stones.len() as f32
-}
-
-// We're going to try to find a number which divide distances into units.
-// TODO: Add a cap on how far away stones can be, which is by 19 *
-// `neighbor_stone_distance`.
-// TODO: Make sure that the `neighbor_stone_distance` never goes below
-// `stone_size`.
-// TODO: Have a hard limit on number of iterations.
-fn average_distance_between_adjacent_intersections(
-    sampled_distances: &[f32],
-    mut neighbor_stone_distance: f32,
-) -> f32 {
-    loop {
-        let mut total_change = 0.0;
-        for d in sampled_distances {
-            let div = d / neighbor_stone_distance;
-            let closest_int = div.round().max(1.0);
-            total_change += d / closest_int - neighbor_stone_distance;
-        }
-        let average_change = total_change / sampled_distances.len() as f32;
-        neighbor_stone_distance += average_change;
-        if average_change.abs() < 1.0 {
-            break;
-        }
-    }
-
-    neighbor_stone_distance
 }
 
 fn find_black_stones(

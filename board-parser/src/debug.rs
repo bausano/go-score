@@ -87,24 +87,11 @@ pub(crate) fn board(
 }
 
 #[allow(dead_code)]
-pub(crate) fn board_on_image(
+pub(crate) fn highlight_pixels_in_image(
     image: &image::RgbImage,
-    field_size: f32,
-    stones: &[Point],
     should_highlight: impl Fn(u32, u32) -> bool,
 ) {
-    let field_radius = field_size as u32 / 2;
     let mut image = image.clone();
-
-    // // Draws the fields.
-    // for stone in stones {
-    //     for y in (stone.y - field_radius)..(stone.y + field_radius) {
-    //         for x in (stone.x - field_radius)..(stone.x + field_radius) {
-    //             let pixel = image.get_pixel_mut(x, y);
-    //             pixel.0 = [255, 255, 255];
-    //         }
-    //     }
-    // }
 
     // Draws the lines.
     for (x, y, pixel) in image.enumerate_pixels_mut() {
