@@ -93,6 +93,7 @@ impl BlackStone {
         self.bottom_right.y - self.top_left.y
     }
 
+    // TODO: Document.
     fn center(&self) -> Point {
         let x =
             self.bottom_right.x - (self.bottom_right.x - self.top_left.x) / 2;
@@ -103,7 +104,7 @@ impl BlackStone {
 }
 
 pub fn board_map(image: &image::RgbImage) -> Option<BoardMap> {
-    let (_stone_size, stones) = find_black_stones(image)?;
+    let (stone_size, stones) = find_black_stones(image)?;
     // From now on we're only concerned about the center points.
     let stones: Vec<_> =
         stones.into_iter().map(|stone| stone.center()).collect();
@@ -113,14 +114,14 @@ pub fn board_map(image: &image::RgbImage) -> Option<BoardMap> {
         return None;
     }
 
-    let a = -1.0 / 10000.0;
-    let b = -1.0 / 4000.0;
-    let cx = 788.0;
-    let cy = 585.0;
-    let sx = 46.0;
-    let sy = 55.0;
-    let asx = -1.0 / 110.0;
-    let asy = 0.0;
+    let a = 1.0 / 10000.0;
+    let b = 1.0 / 9000.0;
+    let cx = 360.0;
+    let cy = 760.0;
+    let sx = stone_size - 0.5;
+    let sy = stone_size + 2.0;
+    let asx = 1.0 / 3000.0;
+    let asy = 1.0 / 3000.0;
 
     let e = transformation_error(&stones, cx, cy, a, b, sx, sy, asx, asy);
 
@@ -249,6 +250,7 @@ fn transformation_error(
     total_e / stones.len() as f32
 }
 
+// TODO: Document and improvements.
 fn find_black_stones(
     image: &image::RgbImage,
 ) -> Option<(f32, Vec<BlackStone>)> {
