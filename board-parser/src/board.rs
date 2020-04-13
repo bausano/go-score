@@ -114,36 +114,75 @@ pub fn board_map(image: &image::RgbImage) -> Option<BoardMap> {
         return None;
     }
 
-    let a = 1.0 / 10000.0;
-    let b = 1.0 / 9000.0;
-    let cx = 360.0;
-    let cy = 760.0;
-    let sx = stone_size - 0.5;
-    let sy = stone_size + 2.0;
-    let asx = 1.0 / 3000.0;
-    let asy = 1.0 / 3000.0;
+    let tr = LatticeTransformation {
+        center: XYTuple { x: 360.0, y: 760.0 },
+        stretch: XYTuple {
+            x: 1.0 / 10000.0,
+            y: 1.0 / 9000.0,
+        },
+        intersection_spacing: XYTuple {
+            x: stone_size - 0.5,
+            y: stone_size + 2.0,
+        },
+        intersection_spacing_increment: XYTuple {
+            x: 1.0 / 3000.0,
+            y: 1.0 / 3000.0,
+        },
+    };
 
-    let e = transformation_error(&stones, cx, cy, a, b, sx, sy, asx, asy);
+    let e = transformation_error(&stones, tr.clone());
 
     println!("This transformation has an error of {}", e);
 
-    // 8 parameters to get right.
-    // rotation????????/
-
-    #[cfg(test)]
-    debug::highlight_pixels_in_image(&image, |x, y| {
-        let x = x as f32;
-        let y = y as f32;
-        let x = x - cx;
-        let y = y - cy;
-        let x = x - a * y * x;
-        let div_x = x / (sx + asx * x);
-        let y = y - b * y * x;
-        let div_y = y / (sy + asy * y);
-        div_x.fract().abs() < 0.02 || div_y.fract().abs() < 0.02
-    });
+    // #[cfg(test)]
+    // debug::highlight_pixels_in_image(&image, |x, y| {
+    //     let x = x as f32;
+    //     let y = y as f32;
+    //     let x = x - cx;
+    //     let y = y - cy;
+    //     let x = x - a * y * x;
+    //     let div_x = x / (sx + asx * x);
+    //     let y = y - b * y * x;
+    //     let div_y = y / (sy + asy * y);
+    //     div_x.fract().abs() < 0.02 || div_y.fract().abs() < 0.02
+    // });
 
     None
+}
+
+// Anything that can be represented by float value and is semantically the same
+// thing but for different dimension. This could be a position or some parameter
+// which the position is scaled by in particular dimension, x or y.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct XYTuple {
+    pub x: f32,
+    pub y: f32,
+}
+
+// According to the numbering convention, the position of an intersection within
+// a lattice.
+type Intersection = (isize, isize);
+
+// The error to the four nearest intersections in the lattice. The Intersection
+// represents the top left intersection by convention, the other four follow.
+type ErrorOnNearestIntersections = (Intersection, [f32; 4]);
+
+#[derive(Clone)]
+struct LatticeTransformation {
+    // Where's the lattice center.
+    center: XYTuple,
+    // How much should be the lattice stretched in x and y direction as the x
+    // and y increase. They will be plugged into `a * x * y` term where x is the
+    // horizontal distance from the center point x, and analogically y is the
+    // vertical distance.
+    stretch: XYTuple,
+    // How are the intersections in the lattice spaced horizontally and
+    // vertically.
+    intersection_spacing: XYTuple,
+    // The further the intersection from the center, the further the
+    // intersections are spaced. This parameter defines how much the spacing
+    // grows.
+    intersection_spacing_increment: XYTuple,
 }
 
 // Given transformation parameters, calculate how well it approximates the found
@@ -151,69 +190,138 @@ pub fn board_map(image: &image::RgbImage) -> Option<BoardMap> {
 // TODO: Code clean up lol.
 fn transformation_error(
     stones: &[Point],
-    cx: f32,
-    cy: f32,
-    a: f32,
-    b: f32,
-    sx: f32,
-    sy: f32,
-    asx: f32,
-    asy: f32,
+    transformation: LatticeTransformation,
 ) -> f32 {
-    let mut stone_errors: HashMap<Point, [((f32, f32), f32); 4]> =
+    let LatticeTransformation {
+        center,
+        stretch,
+        intersection_spacing,
+        intersection_spacing_increment,
+    } = transformation;
+    // This map stores information for each stone of what was their error to
+    // the four nearest intersections. This information becomes relevant when
+    // two stones prefer the same intersection. We can find other intersections
+    // that the stone with higher error can be moved to.
+    let mut stone_errors: HashMap<Point, ErrorOnNearestIntersections> =
         HashMap::with_capacity(stones.len());
-    let mut intersection_stones: HashMap<(isize, isize), Vec<(Point, f32)>> =
+
+    // With each lattice intersection, there can be any number of stones that
+    // claim it. Ideally though, there would be at most one. All stones are
+    // going to be matched with some intersection they prefer the most. When we
+    // place all stones, we visit each intersection. If the intersection has
+    // more than one stone which claims it, the stone with more error will be
+    // moved to another yet unclaimed intersection.
+    let mut intersection_stones: HashMap<Intersection, Vec<(Point, f32)>> =
         HashMap::with_capacity(stones.len());
+
+    // We visit each stone, apply the transformation, calculate error to the
+    // 4 closest intersections, and store that information.
+    //  top_left     top_right
+    //         +-----+
+    //         |     |
+    //         | x   |
+    //         +-----+
+    // bottom_left  bottom_right
     for stone in stones {
         let stone = *stone;
-        let (stone_x, stone_y) = (stone.x as f32, stone.y as f32);
-        let (from_center_x, from_center_y) = (stone_x - cx, stone_y - cy);
+        // Calculates the position relative to center, rather than to (0, 0)
+        // of the image.
+        // TODO: Maybe convert all stone's from Point into XYTuple.
+        let (stone_x, stone_y) =
+            (stone.x as f32 - center.x, stone.y as f32 - center.y);
 
-        let inverse_transformation_x =
-            from_center_x - a * from_center_y * from_center_x;
-        let inverse_transformation_y =
-            from_center_y - b * from_center_y * from_center_x;
+        // If the provided transformation happened, where was the stone before
+        // it happened.
+        let transformation_inverse = XYTuple {
+            x: stone_x - stretch.x * stone_y * stone_x,
+            y: stone_y - stretch.y * stone_y * stone_x,
+        };
 
-        let intersections_from_center_x =
-            inverse_transformation_x / (sx + asx * inverse_transformation_x);
-        let intersections_from_center_y =
-            inverse_transformation_y / (sy + asy * inverse_transformation_y);
+        // We have an estimation for an intersection spacing for both x and y.
+        // According to our estimation, in which row and column is the stone
+        // according to these estimates.
+        let column = transformation_inverse.x
+            / (intersection_spacing.x
+                + intersection_spacing_increment.x * transformation_inverse.x);
 
-        let top_left_x = intersections_from_center_x.floor();
-        let top_left_y = intersections_from_center_y.floor();
-        let bottom_left_x = top_left_x;
-        let bottom_left_y = intersections_from_center_y.ceil();
-        let top_right_x = intersections_from_center_x.ceil();
-        let top_right_y = top_left_y;
-        let bottom_right_x = top_right_x;
-        let bottom_right_y = bottom_left_y;
+        let row = transformation_inverse.y
+            / (intersection_spacing.y
+                + intersection_spacing_increment.y * transformation_inverse.y);
 
-        let top_left_e = (top_left_x - intersections_from_center_x).powi(2)
-            + (top_left_y - intersections_from_center_y).powi(2);
-        let top_right_e = (top_right_x - intersections_from_center_x).powi(2)
-            + (top_right_y - intersections_from_center_y).powi(2);
-        let bottom_left_e = (bottom_left_x - intersections_from_center_x)
-            .powi(2)
-            + (bottom_left_y - intersections_from_center_y).powi(2);
-        let bottom_right_e = (bottom_right_x - intersections_from_center_x)
-            .powi(2)
-            + (bottom_right_y - intersections_from_center_y).powi(2);
+        // What are the intersections which are close by.
+        let intersection_to_the_left = column.floor();
+        let intersection_to_the_right = column.ceil();
+        let intersection_below = row.ceil();
+        let intersection_above = row.floor();
 
-        let errors = [
-            ((top_left_x, top_left_y), top_left_e),
-            ((top_right_x, top_right_y), top_right_e),
-            ((bottom_left_x, bottom_left_y), bottom_left_e),
-            ((bottom_right_x, bottom_right_y), bottom_right_e),
-        ];
-        let ((least_e_x, least_e_y), least_e) = errors
+        // Calculates distances squared between the x and y components of the
+        // intersections around the stone.
+        let intersection_to_the_left_distance_square =
+            (intersection_to_the_left - column).powi(2);
+        let intersection_to_the_right_distance_square =
+            (intersection_to_the_right - column).powi(2);
+        let intersection_above_distance_square =
+            (intersection_above - row).powi(2);
+        let intersection_below_distance_square =
+            (intersection_below - row).powi(2);
+
+        // For convenience we convert these into integers.
+        let intersection_to_the_left = intersection_to_the_left as isize;
+        let intersection_to_the_right = intersection_to_the_right as isize;
+        let intersection_below = intersection_below as isize;
+        let intersection_above = intersection_above as isize;
+
+        // Calculates errors to each of the four lattice intersections. The
+        // error the distance `c = sqrt(a^2 + b^2)`, but it's squared as the
+        // larger error is more damaging.
+        let top_left = (intersection_to_the_left, intersection_above);
+        let top_left_e = intersection_to_the_left_distance_square
+            + intersection_above_distance_square;
+
+        let top_right = (intersection_to_the_right, intersection_above);
+        let top_right_e = intersection_to_the_right_distance_square
+            + intersection_above_distance_square;
+
+        let bottom_left = (intersection_to_the_left, intersection_below);
+        let bottom_left_e = intersection_to_the_left_distance_square
+            + intersection_below_distance_square;
+
+        let bottom_right = (intersection_to_the_right, intersection_below);
+        let bottom_right_e = intersection_to_the_right_distance_square
+            + intersection_below_distance_square;
+
+        // Packs the results into an array.
+        let errors = [top_left_e, top_right_e, bottom_left_e, bottom_right_e];
+
+        // We get the intersection towards which the stone had the least error
+        // as well as what the error was.
+        let (least_e_intersection, least_e) = errors
             .iter()
-            .min_by(|(_, a_e), (_, b_e)| a_e.partial_ord(*b_e))
             .copied()
+            .enumerate()
+            .min_by(|(_, a_e), (_, b_e)| a_e.partial_ord(*b_e))
             .expect("There must be one point which has least error");
-        stone_errors.insert(stone, errors);
-        let least_e_pos = (least_e_x as isize, least_e_y as isize);
+
+        // We store the errors to each intersection for this stone.
+        stone_errors.insert(stone, (top_left, errors));
+
+        // Based on the enumerated number in the errors array finds out which
+        // intersection has the least error to the stone.
+        let least_e_intersection = if least_e_intersection == 0 {
+            top_left
+        } else if least_e_intersection == 1 {
+            top_right
+        } else if least_e_intersection == 2 {
+            bottom_left
+        } else {
+            bottom_right
+        };
+
+        // We get the vec of stones which want to be at this intersection. If
+        // the intersection wasn't visited yet, we create an empty vector. Then
+        // we push the stone along with the error it had into the list.
         let intersection_candidates =
-            intersection_stones.entry(least_e_pos).or_default();
+            intersection_stones.entry(least_e_intersection).or_default();
         intersection_candidates.push((stone, least_e));
     }
 
@@ -222,7 +330,6 @@ fn transformation_error(
     // intersection. Look at the other 3 possible intersections of the stone.
     // Put it on first empty one. If all intersections are non empty, for now
     // panic with `todo!`.
-
     let mut stones_to_reassign: Vec<Point> = Vec::default();
     for stones in intersection_stones.values_mut() {
         if stones.len() > 1 {
@@ -233,12 +340,11 @@ fn transformation_error(
     }
 
     if !stones_to_reassign.is_empty() {
-        unimplemented!(
+        todo!(
             "Stones to reassign is not empty. You need to place them \
             somewhere before we can calculate the error."
         );
-
-        // here's where stone_errors comes into play.
+        // Here's where stone_errors comes into play.
     }
 
     // Each intersection should have exactly one stone.
