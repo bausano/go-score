@@ -1,3 +1,4 @@
+use std::cmp::Ordering;
 use std::ops::Sub;
 
 pub trait NumExt
@@ -9,6 +10,16 @@ where
             self - other
         } else {
             other - self
+        }
+    }
+
+    fn partial_ord(self, other: Self) -> Ordering {
+        if self > other {
+            Ordering::Greater
+        } else if self < other {
+            Ordering::Less
+        } else {
+            Ordering::Equal
         }
     }
 }

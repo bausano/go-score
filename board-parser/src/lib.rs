@@ -19,7 +19,7 @@ mod tests {
     fn development_test() {
         let assets = &Path::new(ASSETS_DIR);
         let image =
-            image::open(assets.join("test10.jpeg")).expect("Cannot open image");
+            image::open(assets.join("test11.jpeg")).expect("Cannot open image");
         board::board_map(&image.to_rgb());
     }
 }

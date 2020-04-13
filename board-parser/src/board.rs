@@ -1,12 +1,11 @@
 #[cfg(test)]
 use crate::debug;
 use crate::num_ext::*;
-use std::cmp::Ordering;
 use std::collections::HashMap;
 
 const BLACK_THRESHOLD: u8 = 30;
 const GRAYNESS_LIMIT: u8 = 8;
-const MIN_STONE_SIZE: u32 = 5;
+const MIN_STONE_SIZE: f32 = 8.0;
 const MIN_BLACK_STONES_ON_BOARD: usize = 6;
 
 pub type BoardMap = HashMap<(i8, i8), Point>;
@@ -20,7 +19,7 @@ pub(crate) struct BlackStone {
     pub bottom_right: Point,
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
 pub struct Point {
     pub x: u32,
     pub y: u32,
@@ -46,12 +45,6 @@ impl Point {
         // |.5 - .2| = .3
         // 1 - .1 - .3 = .6
         1.0 - (0.5 - div_y.fract()).abs() - (0.5 - div_x.fract()).abs()
-    }
-}
-
-impl PartialEq for Point {
-    fn eq(&self, other: &Point) -> bool {
-        self.x == other.x && self.y == other.y
     }
 }
 
@@ -202,12 +195,19 @@ pub fn board_map(image: &image::RgbImage) -> Option<BoardMap> {
         adjacent_intersection_distance
     );
 
-    let a = 1.0 / 10000.0;
-    let b = 1.0 / 15000.0;
-    let cx = 775.0;
-    let cy = 345.0;
-    let sx = 56.4;
-    let sy = 53.8;
+    let a = -1.0 / 10000.0;
+    let b = -1.0 / 4000.0;
+    let cx = 788.0;
+    let cy = 585.0;
+    let sx = 46.0;
+    let sy = 55.0;
+    let asx = -1.0 / 110.0;
+    let asy = 0.0;
+
+    transformation_error(&stones, cx, cy, a, b, sx, sy, asx, asy);
+
+    // 8 parameters to get right.
+    // rotation????????/
 
     #[cfg(test)]
     debug::board_on_image(
@@ -220,14 +220,118 @@ pub fn board_map(image: &image::RgbImage) -> Option<BoardMap> {
             let x = x - cx;
             let y = y - cy;
             let x = x - a * y * x;
-            let div_x = x / sx;
+            let div_x = x / (sx + asx * x);
             let y = y - b * y * x;
-            let div_y = y / sy;
+            let div_y = y / (sy + asy * y);
             div_x.fract().abs() < 0.02 || div_y.fract().abs() < 0.02
         },
     );
 
     None
+}
+
+// Given transformation parameters, calculate how well it approximates the found
+// black stones positions.
+// TODO: Code clean up lol.
+fn transformation_error(
+    stones: &[Point],
+    cx: f32,
+    cy: f32,
+    a: f32,
+    b: f32,
+    sx: f32,
+    sy: f32,
+    asx: f32,
+    asy: f32,
+) -> f32 {
+    let mut stone_errors: HashMap<Point, [((f32, f32), f32); 4]> =
+        HashMap::with_capacity(stones.len());
+    let mut intersection_stones: HashMap<(isize, isize), Vec<(Point, f32)>> =
+        HashMap::with_capacity(stones.len());
+    for stone in stones {
+        let stone = *stone;
+        let (stone_x, stone_y) = (stone.x as f32, stone.y as f32);
+        let (from_center_x, from_center_y) = (stone_x - cx, stone_y - cy);
+
+        let inverse_transformation_x =
+            from_center_x - a * from_center_y * from_center_x;
+        let inverse_transformation_y =
+            from_center_y - b * from_center_y * from_center_x;
+
+        let intersections_from_center_x =
+            inverse_transformation_x / (sx + asx * inverse_transformation_x);
+        let intersections_from_center_y =
+            inverse_transformation_y / (sy + asy * inverse_transformation_y);
+
+        let top_left_x = intersections_from_center_x.floor();
+        let top_left_y = intersections_from_center_y.floor();
+        let bottom_left_x = top_left_x;
+        let bottom_left_y = intersections_from_center_y.ceil();
+        let top_right_x = intersections_from_center_x.ceil();
+        let top_right_y = top_left_y;
+        let bottom_right_x = top_right_x;
+        let bottom_right_y = bottom_left_y;
+
+        let top_left_e = (top_left_x - intersections_from_center_x).powi(2)
+            + (top_left_y - intersections_from_center_y).powi(2);
+        let top_right_e = (top_right_x - intersections_from_center_x).powi(2)
+            + (top_right_y - intersections_from_center_y).powi(2);
+        let bottom_left_e = (bottom_left_x - intersections_from_center_x)
+            .powi(2)
+            + (bottom_left_y - intersections_from_center_y).powi(2);
+        let bottom_right_e = (bottom_right_x - intersections_from_center_x)
+            .powi(2)
+            + (bottom_right_y - intersections_from_center_y).powi(2);
+
+        let errors = [
+            ((top_left_x, top_left_y), top_left_e),
+            ((top_right_x, top_right_y), top_right_e),
+            ((bottom_left_x, bottom_left_y), bottom_left_e),
+            ((bottom_right_x, bottom_right_y), bottom_right_e),
+        ];
+        let ((least_e_x, least_e_y), least_e) = errors
+            .iter()
+            .min_by(|(_, a_e), (_, b_e)| a_e.partial_ord(*b_e))
+            .copied()
+            .expect("There must be one point which has least error");
+        stone_errors.insert(stone, errors);
+        let least_e_pos = (least_e_x as isize, least_e_y as isize);
+        let intersection_candidates =
+            intersection_stones.entry(least_e_pos).or_default();
+        intersection_candidates.push((stone, least_e));
+    }
+
+    // For each intersection which has more than 2 stones, discard all except
+    // the one with least error. Each discarded stone must be placed on another
+    // intersection. Look at the other 3 possible intersections of the stone.
+    // Put it on first empty one. If all intersections are non empty, for now
+    // panic with `todo!`.
+
+    let mut stones_to_reassign: Vec<Point> = Vec::default();
+    for stones in intersection_stones.values_mut() {
+        if stones.len() > 1 {
+            stones.sort_by(|(_, a_e), (_, b_e)| a_e.partial_ord(*b_e));
+            stones_to_reassign
+                .extend(stones.drain(1..).map(|(p, _)| p).collect::<Vec<_>>());
+        }
+    }
+
+    if !stones_to_reassign.is_empty() {
+        unimplemented!(
+            "Stones to reassign is not empty. You need to place them \
+            somewhere before we can calculate the error."
+        );
+
+        // here's where stone_errors comes into play.
+    }
+
+    // Each intersection should have exactly one stone.
+    let total_e = intersection_stones
+        .values()
+        .fold(0.0, |acc, vec| acc + vec[0].1);
+
+    // Average error.
+    total_e / stones.len() as f32
 }
 
 // We're going to try to find a number which divide distances into units.
@@ -376,7 +480,12 @@ fn find_black_objects(mut image: BlackPixels) -> Vec<BlackStone> {
         .into_iter()
         // Filters out some noise by removing tiny objects.
         .filter(|object| {
-            object.width() > MIN_STONE_SIZE || object.height() > MIN_STONE_SIZE
+            let w = object.width() as f32;
+            let h = object.height() as f32;
+            w > MIN_STONE_SIZE
+                && h > MIN_STONE_SIZE
+                && w > h * 0.66
+                && w < h * 1.5
         })
         .collect()
 }
